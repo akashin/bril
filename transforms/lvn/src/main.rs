@@ -52,9 +52,7 @@ struct Instruction {
 impl Instruction {
     fn is_terminator(&self) -> bool {
         match &self.op {
-            Some(op) => {
-                op == "jmp" || op == "cond"
-            }
+            Some(op) => op == "jmp" || op == "cond",
             None => false,
         }
     }
