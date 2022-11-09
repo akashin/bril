@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::io::Read;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -65,12 +66,16 @@ impl Instruction {
             None => false,
         }
     }
+
+    fn is_label(&self) -> bool {
+        self.label.is_some()
+    }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct Block {
     instrs: Vec<Instruction>,
-    next_blocks: Vec<i64>,
+    next_blocks: Vec<usize>,
 }
 
 #[derive(Debug)]
@@ -91,24 +96,50 @@ impl ControlFlowGraph {
 fn construct_control_flow_graph(function: &Function) -> ControlFlowGraph {
     let mut cfg = ControlFlowGraph { blocks: Vec::new() };
 
-    let mut cur_block = Block {
-        instrs: Vec::new(),
-        next_blocks: Vec::new(),
+    let mut cur_block = Block::default();
+    let mut flush_block = |block: &mut Block| {
+        if !block.instrs.is_empty() {
+            cfg.blocks.push(std::mem::take(block));
+        }
     };
 
     for instr in &function.instrs {
+        // Label is always starting a new block.
+        if instr.is_label() {
+            flush_block(&mut cur_block);
+        }
+
         cur_block.instrs.push(instr.clone());
+
+        // Terminator always ends the block.
         if instr.is_terminator() {
-            // TODO: Fill next_blocks field.
-            cfg.blocks.push(cur_block);
-            cur_block = Block {
-                instrs: Vec::new(),
-                next_blocks: Vec::new(),
-            };
+            flush_block(&mut cur_block);
         }
     }
-    if !cur_block.instrs.is_empty() {
-        cfg.blocks.push(cur_block);
+    flush_block(&mut cur_block);
+
+    // Populate mapping from labels to block indices.
+    let mut label_to_block_index: HashMap<String, usize> = HashMap::new();
+    for (i, block) in cfg.blocks.iter().enumerate() {
+        if let Some(label) = &block.instrs[0].label {
+            label_to_block_index.insert(label.clone(), i);
+        }
+    }
+
+    // Populate next block pointers.
+    for i in 0..cfg.blocks.len() {
+        let block = &mut cfg.blocks[i];
+        if let Some(instr) = block.instrs.last() {
+            if instr.is_terminator() {
+                for label in &instr.labels {
+                    block
+                        .next_blocks
+                        .push(*label_to_block_index.get(label).expect("Label not found"));
+                }
+            } else {
+                block.next_blocks.push(i + 1);
+            }
+        }
     }
 
     cfg
@@ -129,7 +160,9 @@ fn main() {
     for function in &mut program.functions {
         let cfg = construct_control_flow_graph(function);
         let cfg = eliminate_dead_code(cfg);
-        // dbg!(&cfg);
+        for (i, block) in cfg.blocks.iter().enumerate() {
+            eprintln!("{i} -> {:?}", block.next_blocks);
+        }
         function.instrs = cfg.to_instrs();
     }
 
