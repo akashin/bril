@@ -9,6 +9,15 @@ struct Program {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct NamedArg {
+    name: String,
+
+    #[serde(rename = "type")]
+    type_: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Function {
     name: String,
 
@@ -16,7 +25,7 @@ struct Function {
 
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    args: Vec<String>,
+    args: Vec<NamedArg>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -52,7 +61,7 @@ struct Instruction {
 impl Instruction {
     fn is_terminator(&self) -> bool {
         match &self.op {
-            Some(op) => op == "jmp" || op == "cond",
+            Some(op) => op == "jmp" || op == "br" || op == "ret",
             None => false,
         }
     }
@@ -90,6 +99,7 @@ fn construct_control_flow_graph(function: &Function) -> ControlFlowGraph {
     for instr in &function.instrs {
         cur_block.instrs.push(instr.clone());
         if instr.is_terminator() {
+            // TODO: Fill next_blocks field.
             cfg.blocks.push(cur_block);
             cur_block = Block {
                 instrs: Vec::new(),
@@ -119,7 +129,7 @@ fn main() {
     for function in &mut program.functions {
         let cfg = construct_control_flow_graph(function);
         let cfg = eliminate_dead_code(cfg);
-        dbg!(&cfg);
+        // dbg!(&cfg);
         function.instrs = cfg.to_instrs();
     }
 
