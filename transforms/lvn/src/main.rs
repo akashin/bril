@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -40,7 +40,8 @@ struct Instruction {
     dest: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    value: Option<serde_json::Value>,
+    // value: Option<serde_json::Value>,
+    value: Option<i64>,
 
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -145,7 +146,57 @@ fn construct_control_flow_graph(function: &Function) -> ControlFlowGraph {
     cfg
 }
 
-fn eliminate_dead_code(cfg: ControlFlowGraph) -> ControlFlowGraph {
+#[derive(PartialEq, Eq, Hash, Debug)]
+enum Expression {
+    Op(String, Vec<usize>),
+    Const(i64),
+}
+
+fn remove_unused_instructions(block: &mut Block) -> bool {
+    let mut variable_to_number: HashMap<String, usize> = HashMap::new();
+    let mut expression_to_number: HashMap<Expression, usize> = HashMap::new();
+    let mut next_number = 0;
+    let mut used_variables = HashSet::new();
+    for instr in &block.instrs {
+        // dbg!(&instr);
+        if let Some(dest) = &instr.dest {
+            let op = instr.op.as_ref().expect("No op found").clone();
+            let expression = if op == "const" {
+                Expression::Const(instr.value.unwrap())
+            } else {
+                // Convert args to value numbers.
+                let args: Vec<usize> = instr
+                    .args
+                    .iter()
+                    .map(|arg| *variable_to_number.get(arg).expect("No number for variable"))
+                    .collect();
+                // Construct expression (op, vn1, vn2, ...)
+                Expression::Op(op, args)
+            };
+            // Look it up, create if missing or reuse.
+            let number = *expression_to_number.entry(expression).or_insert_with(|| {
+                next_number += 1;
+                next_number - 1
+            });
+            // Update the mapping from variable name (dest) to value number.
+            variable_to_number.insert(dest.clone(), number);
+        } else {
+            if let Some(_) = &instr.op {
+                for arg in &instr.args {
+                    used_variables.insert(arg);
+                }
+            }
+        }
+    }
+    dbg!(variable_to_number);
+    dbg!(expression_to_number);
+    false
+}
+
+fn eliminate_dead_code(mut cfg: ControlFlowGraph) -> ControlFlowGraph {
+    for block in cfg.blocks.iter_mut() {
+        remove_unused_instructions(block);
+    }
     cfg
 }
 
@@ -160,9 +211,6 @@ fn main() {
     for function in &mut program.functions {
         let cfg = construct_control_flow_graph(function);
         let cfg = eliminate_dead_code(cfg);
-        for (i, block) in cfg.blocks.iter().enumerate() {
-            eprintln!("{i} -> {:?}", block.next_blocks);
-        }
         function.instrs = cfg.to_instrs();
     }
 
