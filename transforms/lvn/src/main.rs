@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Read;
+use std::iter::FromIterator;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -146,19 +147,20 @@ fn construct_control_flow_graph(function: &Function) -> ControlFlowGraph {
     cfg
 }
 
-#[derive(PartialEq, Eq, Hash, Debug)]
+#[derive(PartialEq, Eq, Hash, Debug, Clone)]
 enum Expression {
     Op(String, Vec<usize>),
     Const(i64),
 }
 
-fn remove_unused_instructions(block: &mut Block) -> bool {
+fn run_local_value_numbering(block: &mut Block) -> bool {
     let mut variable_to_number: HashMap<String, usize> = HashMap::new();
     let mut expression_to_number: HashMap<Expression, usize> = HashMap::new();
+    let mut number_to_expression: HashMap<usize, Expression> = HashMap::new();
     let mut next_number = 0;
-    let mut used_variables = HashSet::new();
+    let mut used_numbers = HashSet::new();
+    let mut instruction_numbers = Vec::new();
     for instr in &block.instrs {
-        // dbg!(&instr);
         if let Some(dest) = &instr.dest {
             let op = instr.op.as_ref().expect("No op found").clone();
             let expression = if op == "const" {
@@ -174,28 +176,68 @@ fn remove_unused_instructions(block: &mut Block) -> bool {
                 Expression::Op(op, args)
             };
             // Look it up, create if missing or reuse.
-            let number = *expression_to_number.entry(expression).or_insert_with(|| {
-                next_number += 1;
-                next_number - 1
-            });
+            let number = *expression_to_number
+                .entry(expression.clone())
+                .or_insert_with(|| {
+                    next_number += 1;
+                    next_number - 1
+                });
+            number_to_expression.insert(number, expression);
             // Update the mapping from variable name (dest) to value number.
             variable_to_number.insert(dest.clone(), number);
+            instruction_numbers.push(Some(number));
         } else {
             if let Some(_) = &instr.op {
                 for arg in &instr.args {
-                    used_variables.insert(arg);
+                    used_numbers
+                        .insert(*variable_to_number.get(arg).expect("No number for variable"));
                 }
+            }
+            instruction_numbers.push(None);
+        }
+    }
+    let mut queue = VecDeque::new();
+    queue.extend(used_numbers.clone());
+
+    while !queue.is_empty() {
+        let number = queue.pop_front().unwrap();
+        let expression = number_to_expression.get(&number).unwrap();
+        match expression {
+            Expression::Op(_, args) => {
+                for arg in args {
+                    if used_numbers.contains(arg) {
+                        continue;
+                    }
+                    used_numbers.insert(*arg);
+                    queue.push_back(*arg);
+                }
+            }
+            Expression::Const(_) => {
+                // We just mark this instruction as used.
             }
         }
     }
-    dbg!(variable_to_number);
-    dbg!(expression_to_number);
+
+    // Remove unused instructions.
+    let mut new_instrs = Vec::new();
+    for (i, instr) in block.instrs.iter().enumerate() {
+        if let Some(number) = instruction_numbers[i] {
+            if used_numbers.contains(&number) {
+                new_instrs.push(instr.clone());
+                used_numbers.remove(&number);
+            }
+        } else {
+            new_instrs.push(instr.clone());
+        }
+    }
+    block.instrs = new_instrs;
+
     false
 }
 
 fn eliminate_dead_code(mut cfg: ControlFlowGraph) -> ControlFlowGraph {
     for block in cfg.blocks.iter_mut() {
-        remove_unused_instructions(block);
+        run_local_value_numbering(block);
     }
     cfg
 }
