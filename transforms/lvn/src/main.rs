@@ -219,14 +219,39 @@ fn run_local_value_numbering(block: &mut Block) -> bool {
 
     // Remove unused instructions.
     let mut new_instrs = Vec::new();
+    let mut number_to_canonical_dest: HashMap<usize, String> = HashMap::new();
+    let mut new_variable_to_number: HashMap<String, usize> = HashMap::new();
     for (i, instr) in block.instrs.iter().enumerate() {
         if let Some(number) = instruction_numbers[i] {
+            new_variable_to_number.insert(instr.dest.clone().unwrap(), number);
             if used_numbers.contains(&number) {
-                new_instrs.push(instr.clone());
+                number_to_canonical_dest.insert(number, instr.dest.clone().unwrap());
+
+                let mut new_instr = instr.clone();
+                for arg in new_instr.args.iter_mut() {
+                    let arg_number = new_variable_to_number
+                        .get(arg)
+                        .expect("No number for variable");
+                    *arg = number_to_canonical_dest
+                        .get(arg_number)
+                        .expect("No canonical dest for number")
+                        .clone();
+                }
+                new_instrs.push(new_instr);
                 used_numbers.remove(&number);
             }
         } else {
-            new_instrs.push(instr.clone());
+            let mut new_instr = instr.clone();
+            for arg in new_instr.args.iter_mut() {
+                let arg_number = new_variable_to_number
+                    .get(arg)
+                    .expect("No number for variable");
+                *arg = number_to_canonical_dest
+                    .get(arg_number)
+                    .expect("No canonical dest for number")
+                    .clone();
+            }
+            new_instrs.push(new_instr);
         }
     }
     block.instrs = new_instrs;
