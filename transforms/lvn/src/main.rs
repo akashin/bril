@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Read;
-use std::iter::FromIterator;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -187,7 +186,7 @@ fn run_local_value_numbering(block: &mut Block) -> bool {
             variable_to_number.insert(dest.clone(), number);
             instruction_numbers.push(Some(number));
         } else {
-            if let Some(_) = &instr.op {
+            if instr.op.is_some() {
                 for arg in &instr.args {
                     used_numbers
                         .insert(*variable_to_number.get(arg).expect("No number for variable"));
